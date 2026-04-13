@@ -1,0 +1,40 @@
+# mock-downstream: BFF 라우트 테이블에서 /mock → 이 서비스로 연결
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-downstream
+  namespace: test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mock-downstream
+  template:
+    metadata:
+      labels:
+        app: mock-downstream
+        sidecar.istio.io/inject: "true"
+    spec:
+      containers:
+        - name: mock
+          image: your-registry/mock-downstream:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            requests: { cpu: 100m, memory: 64Mi }
+            limits:   { cpu: 500m, memory: 128Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-downstream
+  namespace: test
+spec:
+  selector:
+    app: mock-downstream
+  ports:
+    - port: 80
+      targetPort: 8080
