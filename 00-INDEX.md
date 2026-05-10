@@ -18,12 +18,13 @@
 | 10 | [[10-JVM-옵션-비교]] | Java 8→25 JVM 옵션 변경점, 추천 설정, 제거된 옵션, 튜닝 후보 |
 | - | [[99-QnA]] | 궁금한 점 모음 |
 
-## 코드
+## 코드 / 배포
 
 | 디렉토리 | 내용 |
 |----------|------|
 | `mock-downstream/` | Go Mock 서비스 (main.go, Dockerfile, k8s.yaml, k6-helpers.js) |
 | `k6-scripts/` | k6 테스트 스크립트 (시나리오 A~G, mixed, 일괄 실행) |
+| `k8s/` | [[k8s/k6-operator-운영가이드]], k6-operator-values.yaml (OKD), TestRun 예시 |
 
 ## 배경
 

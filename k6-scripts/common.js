@@ -7,8 +7,11 @@ import { Trend, Counter } from 'k6/metrics';
 
 // ── 환경변수 ──
 
-export const BFF = __ENV.BFF_HOST || 'http://bff.test.svc';
-export const MOCK = __ENV.MOCK_HOST || 'http://mock-downstream.test.svc';
+// 둘 다 base URL (scheme + host + port). 호출 시 추가 포트를 붙이지 않는다.
+//   k6-operator: BFF_HOST=http://bff.test.svc.cluster.local:8080
+//                MOCK_HOST=http://mock-downstream.test.svc.cluster.local:8080
+export const BFF = __ENV.BFF_HOST || 'http://bff.test.svc:8080';
+export const MOCK = __ENV.MOCK_HOST || 'http://mock-downstream.test.svc:8080';
 export const DELAY = __ENV.DELAY || '100ms';
 export const SIZE = __ENV.SIZE || '1kb';
 export const ERROR_RATE = __ENV.ERROR_RATE || '0';
@@ -78,23 +81,23 @@ export const PAYLOADS = {
 // ── Mock 관리 ──
 
 export function resetMock() {
-  http.post(`${MOCK}:8080/reset`);
+  http.post(`${MOCK}/reset`);
 }
 
 export function configureMock(config) {
-  http.put(`${MOCK}:8080/config`, JSON.stringify(config), {
+  http.put(`${MOCK}/config`, JSON.stringify(config), {
     headers: { 'Content-Type': 'application/json' },
   });
 }
 
 export function scheduleMock(phases) {
-  http.put(`${MOCK}:8080/config/schedule`, JSON.stringify({ phases }), {
+  http.put(`${MOCK}/config/schedule`, JSON.stringify({ phases }), {
     headers: { 'Content-Type': 'application/json' },
   });
 }
 
 export function getMockMetrics() {
-  return JSON.parse(http.get(`${MOCK}:8080/metrics`).body);
+  return JSON.parse(http.get(`${MOCK}/metrics`).body);
 }
 
 // ── 공통 Thresholds ──

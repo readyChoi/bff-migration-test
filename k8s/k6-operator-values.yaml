@@ -1,0 +1,128 @@
+# k6-operator Helm values — OKD/OpenShift 환경
+#
+# 설치:
+#   helm install k6-operator grafana/k6-operator \
+#     -n k6-operator-system --create-namespace \
+#     -f k6-operator-values.yaml
+#
+# 핵심 OKD 차이점:
+#   1. SCC(restricted-v2)가 UID/GID를 자동 할당 → manifest에서 runAsUser/fsGroup 제거
+#   2. kube-rbac-proxy 비활성화 (root 권한 의존, OKD에서 종종 충돌)
+#   3. seccompProfile: RuntimeDefault 명시
+#   4. capabilities drop ALL
+
+# ─────────────────────────────────────────
+# Manager (controller)
+# ─────────────────────────────────────────
+manager:
+  image:
+    name: ghcr.io/grafana/k6-operator
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  serviceAccount:
+    create: true
+    name: k6-operator-controller
+    # OKD SCC 자동 할당 사용. 필요 시 별도로:
+    #   oc adm policy add-scc-to-user nonroot-v2 -z k6-operator-controller -n k6-operator-system
+
+  # OKD restricted-v2 SCC 호환
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+    # runAsUser, fsGroup 의도적으로 미지정 → SCC가 namespace 범위에서 자동 할당
+
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+    seccompProfile:
+      type: RuntimeDefault
+
+  # 너무 많은 namespace를 watch하지 않도록 제한 (선택)
+  # 비우면 모든 namespace watch
+  # namespace: ""
+
+  env:
+    - name: WATCH_NAMESPACE
+      value: ""    # 모든 namespace. 특정 ns만 지정 시 "test,perf"
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ─────────────────────────────────────────
+# kube-rbac-proxy — OKD에서 비활성화 권장
+# ─────────────────────────────────────────
+# 이유:
+#   - OKD는 자체 인증 프록시(OAuth proxy) 보유
+#   - kube-rbac-proxy는 8443에서 TLS 시작, 일부 환경에서 SCC 충돌
+#   - operator 메트릭은 ServiceMonitor로 직접 노출하면 됨
+kubeRbacProxy:
+  enabled: false
+
+# ─────────────────────────────────────────
+# Prometheus 메트릭 (operator 자체)
+# ─────────────────────────────────────────
+prometheus:
+  # ServiceMonitor 생성 — Prometheus Operator(=cluster monitoring) 환경에서
+  serviceMonitor:
+    enabled: true
+    namespace: k6-operator-system
+    interval: 30s
+    # OpenShift cluster monitoring과 연동 시:
+    # labels:
+    #   k8s-app: k6-operator
+
+# ─────────────────────────────────────────
+# CRD 설치
+# ─────────────────────────────────────────
+crds:
+  install: true
+  keep: true   # helm uninstall 시에도 CRD 유지 (실수로 TestRun 삭제 방지)
+
+# ─────────────────────────────────────────
+# 추가 RBAC (운영자가 testrun 다룰 수 있도록)
+# ─────────────────────────────────────────
+# 선택: 특정 그룹/SA에 testrun edit 권한 부여
+# extraRBAC:
+#   - apiGroups: ["k6.io"]
+#     resources: ["testruns"]
+#     verbs: ["get","list","watch","create","update","patch","delete"]
+
+# ─────────────────────────────────────────
+# 이미지 풀 시크릿 (private registry 사용 시)
+# ─────────────────────────────────────────
+imagePullSecrets: []
+# - name: my-registry-secret
+
+
+# ═════════════════════════════════════════
+# 참고 — TestRun 측 securityContext (chart 외부)
+# ═════════════════════════════════════════
+# TestRun CR의 runner.securityContext도 OKD 호환되도록 작성해야 함:
+#
+# spec:
+#   runner:
+#     securityContext:
+#       runAsNonRoot: true
+#       allowPrivilegeEscalation: false
+#       capabilities:
+#         drop: [ALL]
+#       seccompProfile:
+#         type: RuntimeDefault
+#     # runAsUser, fsGroup 미지정 — SCC 자동 할당
+#
+# 또한 runner pod이 사용하는 ServiceAccount에도 SCC 바인딩 확인:
+#   oc adm policy add-scc-to-user nonroot-v2 -z default -n test

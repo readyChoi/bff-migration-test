@@ -1,0 +1,71 @@
+# 예시 TestRun — scenario-a-latency 실행
+#
+# 사전 준비:
+#   1. namespace 생성: oc new-project test
+#   2. ConfigMap 생성:
+#      kubectl create configmap k6-scripts -n test \
+#        --from-file=../k6-scripts/common.js \
+#        --from-file=../k6-scripts/scenario-a-latency.js
+#   3. (OKD) default SA에 SCC 부여:
+#      oc adm policy add-scc-to-user nonroot-v2 -z default -n test
+#
+# 실행:
+#   kubectl apply -f testrun-scenario-a-example.yaml
+#   kubectl logs -l k6_cr=scenario-a-latency -n test -f --max-log-requests=10
+#   kubectl get testrun scenario-a-latency -n test -w
+#
+# 정리:
+#   kubectl delete testrun scenario-a-latency -n test
+
+apiVersion: k6.io/v1alpha1
+kind: TestRun
+metadata:
+  name: scenario-a-latency
+  namespace: test
+spec:
+  parallelism: 2
+  cleanup: post
+
+  script:
+    configMap:
+      name: k6-scripts
+      file: scenario-a-latency.js
+
+  runner:
+    image: grafana/k6:0.50.0
+    imagePullPolicy: IfNotPresent
+
+    env:
+      # common.js는 host:port 형태의 base URL을 받는다 (포트 미명시 시 기본 80)
+      - name: BFF_HOST
+        value: "http://bff.test.svc:8080"
+      - name: MOCK_HOST
+        value: "http://mock-downstream.test.svc:8080"
+      - name: DELAY
+        value: "100ms"
+      - name: SIZE
+        value: "1kb"
+      # Prometheus Remote Write (있을 때만)
+      - name: K6_PROMETHEUS_RW_SERVER_URL
+        value: "http://prometheus.monitoring.svc:9090/api/v1/write"
+      - name: K6_PROMETHEUS_RW_TREND_STATS
+        value: "p(95),p(99),min,max,avg"
+
+    resources:
+      requests:
+        cpu: "1"
+        memory: "512Mi"
+      limits:
+        cpu: "2"
+        memory: "1Gi"
+
+    # OKD restricted-v2 호환
+    securityContext:
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+      seccompProfile:
+        type: RuntimeDefault
+
+  arguments: --tag scenario=A-1 -o experimental-prometheus-rw

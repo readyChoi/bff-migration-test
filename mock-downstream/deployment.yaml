@@ -1,0 +1,118 @@
+# ──────────────────────────────────────────────────
+# mock-downstream Deployment for OKD
+# ──────────────────────────────────────────────────
+# 빌드 / 배포:
+#   docker build -t <registry>/mock-downstream:v1 .
+#   docker push <registry>/mock-downstream:v1
+#   oc apply -f deployment.yaml -n test
+#   oc apply -f service.yaml   -n test
+#
+# OKD 사전 작업:
+#   oc new-project test                                 # namespace 생성
+#   oc adm policy add-scc-to-user nonroot-v2 \
+#     -z default -n test                                # default SA에 SCC 부여
+#
+# replicas: 1 고정 — schedule/config가 메모리 상태이므로 분산되면 안 됨
+# ──────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-downstream
+  namespace: test
+  labels:
+    app: mock-downstream
+    component: test-fixture
+    part-of: bff-migration-test
+spec:
+  replicas: 1                          # ★ 단일 인스턴스 필수 (schedule/config 일관성)
+  strategy:
+    type: Recreate                     # 신구 pod 동시 존재 금지 (state 충돌 방지)
+  selector:
+    matchLabels:
+      app: mock-downstream
+  template:
+    metadata:
+      labels:
+        app: mock-downstream
+        # Istio sidecar 주입 (BFF 환경과 동일한 mTLS 경로 거치도록)
+        sidecar.istio.io/inject: "true"
+      annotations:
+        # Prometheus scrape (mock의 /metrics endpoint)
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      # OKD restricted-v2 SCC 호환:
+      #   runAsUser/fsGroup 명시 안 함 → SCC가 namespace 범위 UID 자동 할당
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      # SIGTERM 받으면 ListenAndServe 즉시 종료 → 짧게 잡아도 OK
+      terminationGracePeriodSeconds: 10
+
+      containers:
+        - name: mock
+          image: your-registry.example.com/mock-downstream:v1
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          env:
+            # ★ Go runtime이 cgroup CPU limit 자동 인식 못함 (Java VT와 다름)
+            #   → CPU limits를 GOMAXPROCS로 명시 주입
+            #   limits.cpu=500m → GOMAXPROCS=1 (올림)
+            #   limits.cpu=2    → GOMAXPROCS=2
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.cpu
+                  divisor: "1"
+            # GC 페이스 조정 (default 100). mock은 alloc 적어 굳이 안 건드려도 OK
+            # - name: GOGC
+            #   value: "100"
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.memory
+                  divisor: "1"
+
+          resources:
+            # ★ requests = limits → Guaranteed QoS
+            #   (throttling/eviction 방지 → 테스트 결과 안정)
+            requests:
+              cpu: "1"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "256Mi"
+
+          # 시작 직후 한 번 통과 시 readiness/liveness 시작
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            failureThreshold: 10
+            periodSeconds: 1
+
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 5
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+
+          # 컨테이너 레벨 securityContext (OKD restricted-v2 호환)
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true       # 정적 바이너리만 실행 → /tmp 쓸 일 없음
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault

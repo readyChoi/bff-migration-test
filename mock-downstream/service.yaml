@@ -1,0 +1,19 @@
+# Service: 클러스터 내부에서만 접근 (BFF route table에서 호출)
+# 외부 노출 불필요 → Route 안 만듦
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-downstream
+  namespace: test
+  labels:
+    app: mock-downstream
+spec:
+  type: ClusterIP
+  selector:
+    app: mock-downstream
+  ports:
+    - name: http
+      # ★ k6 common.js와 일치: http://mock-downstream.test.svc:8080
+      port: 8080
+      targetPort: http
+      protocol: TCP

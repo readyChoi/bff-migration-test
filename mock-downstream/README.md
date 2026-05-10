@@ -15,14 +15,18 @@ k6 ──→ BFF Pod ──(/mock/*)-→ mock-downstream Pod
 ## 빌드 & 배포
 
 ```bash
-docker build -t your-registry/mock-downstream:latest .
-kubectl apply -f k8s.yaml
+docker build -t your-registry/mock-downstream:v1 .
+docker push your-registry/mock-downstream:v1
+oc apply -f deployment.yaml -n test
+oc apply -f service.yaml    -n test
 ```
+
+OKD 환경 배포의 결정 근거·SCC·GOMAXPROCS·QoS 등 상세 설명은 [[OKD-배포가이드]] 참고.
 
 배포 후 BFF 라우트 테이블에 추가:
 
 ```
-/mock/** → mock-downstream.test.svc
+/mock/** → mock-downstream.test.svc:8080
 ```
 
 ---
